@@ -4,114 +4,240 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RoNz Chord Pro</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-    <!-- Lucide Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- React & Babel -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        
-        @keyframes pulse-ring {
-            0% { transform: scale(0.8); opacity: 0.5; }
-            100% { transform: scale(1.5); opacity: 0; }
+        :root {
+            --brand-primary: #6366f1;
+            --bg-main: #09090b;
         }
-        .animate-beat { animation: pulse-ring 0.3s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-main); color: #f4f4f5; overflow-x: hidden; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        
+        pre {
+            font-family: 'JetBrains Mono', monospace;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+            padding: 0;
+        }
+
+        .chord-line { color: #818cf8; font-weight: 700; margin-top: 1.2rem; }
+        .lyrics-line { color: #d4d4d8; margin-top: 0.1rem; }
+        
+        .structure-line { 
+            color: #fbbf24; 
+            font-weight: 800; 
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 2rem;
+            margin-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(251, 191, 36, 0.2);
+            display: inline-block;
+        }
+        
+        .glass-panel {
+            background: rgba(24, 24, 27, 0.7);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(63, 63, 70, 0.4);
+        }
+
+        @keyframes beat {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.4); opacity: 0.5; }
+        }
+        .animate-metronome { animation: beat 0.1s ease-out; }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        @media print {
+            .glass-panel, button, input, header, .fixed { display: none !important; }
+            body { background: white; color: black; }
+            .lyrics-line { color: black; }
+            .chord-line { color: #444; }
+            .structure-line { color: black; border-bottom: 1px solid #ccc; }
+            #root > div { display: block !important; }
+            pre { font-size: 12pt; }
+        }
     </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-        const Icon = ({ name, size = 24, className = "" }) => {
-            const ref = useRef(null);
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const iconRef = useRef(null);
             useEffect(() => {
-                if (window.lucide && ref.current) {
+                if (window.lucide && iconRef.current) {
                     window.lucide.createIcons({
                         icons: { [name]: window.lucide[name] },
                         nameAttr: 'data-lucide'
                     });
                 }
-            }, [name, window.lucide]);
-
-            return <i data-lucide={name} style={{ width: size, height: size }} className={`inline-block ${className}`} ref={ref}></i>;
+            }, [name, size]);
+            return <i ref={iconRef} data-lucide={name} className={`inline-block ${className}`} style={{ width: size, height: size }}></i>;
         };
 
-        const chromaticScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-        const flatsToSharps = { 'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#' };
+        const CHROMATIC = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const FLAT_MAP = { 'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#' };
 
-        const transposeChord = (chordLine, semiTones) => {
-            if (!chordLine || semiTones === 0) return chordLine;
-            return chordLine.replace(/[A-G][#b]?(?:m|maj|min|dim|aug|sus|add)?[0-9]*(?:\/[A-G][#b]?)?/gi, (match) => {
-                return match.replace(/[A-G][#b]?/g, (root) => {
-                    let r = root.toUpperCase();
-                    if (flatsToSharps[r]) r = flatsToSharps[r];
-                    let index = chromaticScale.indexOf(r);
-                    if (index === -1) return root;
-                    let newIndex = (index + semiTones) % 12;
-                    if (newIndex < 0) newIndex += 12;
-                    return chromaticScale[newIndex];
-                });
-            });
-        };
-
-        const isChordLine = (line) => {
-            const trimmed = line.trim();
-            if (!trimmed) return false;
-            const words = trimmed.split(/\s+/);
-            const chordRegex = /^[A-G][#b]?(?:m|maj|min|dim|aug|sus|add)?[0-9]*(?:\/[A-G][#b]?)?$|^\|$/i;
-            const chordWords = words.filter(w => chordRegex.test(w) || w === '|');
-            return chordWords.length > 0 && (chordWords.length / words.length >= 0.4);
-        };
-
-        const getYoutubeId = (url) => {
-            if (!url) return null;
-            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-            const match = url.match(regExp);
-            return (match && match[2].length === 11) ? match[2] : null;
-        };
-
-        function App() {
-            const [songs, setSongs] = useState([]);
-            const [setlists, setSetlists] = useState([]);
-            const [activeTab, setActiveTab] = useState('library');
-            const [isAdding, setIsAdding] = useState(false);
-            const [editingSongId, setEditingSongId] = useState(null); // ID lagu yang sedang diedit
-            const [isAddingSetlist, setIsAddingSetlist] = useState(false);
-            const [viewingSong, setViewingSong] = useState(null);
-            const [activeSetlist, setActiveSetlist] = useState(null);
-            const [isHelpOpen, setIsHelpOpen] = useState(false);
-            const [showVideo, setShowVideo] = useState(false);
+        const App = () => {
+            const [songs, setSongs] = useState(() => JSON.parse(localStorage.getItem('ronz_songs') || '[]'));
+            const [view, setView] = useState('library'); 
+            const [activeSong, setActiveSong] = useState(null);
             const [searchTerm, setSearchTerm] = useState('');
-            
-            const [transposeValue, setTransposeValue] = useState(0);
-            const [isMetronomeActive, setIsMetronomeActive] = useState(false);
-            const [bpm, setBpm] = useState(120);
-            const [beatCounter, setBeatCounter] = useState(0);
-            const [statusMsg, setStatusMsg] = useState(null);
-            
-            const [formData, setFormData] = useState({ title: '', artist: '', style: '', content: '', tempo: 120, key: 'C', youtube: '' });
-            const [tapTimes, setTapTimes] = useState([]);
-            const [setlistName, setSetlistName] = useState('');
-            const [selectedSongs, setSelectedSongs] = useState([]);
+            const [status, setStatus] = useState(null);
 
+            const [form, setForm] = useState({ title: '', artist: '', content: '', tempo: 120, key: 'C', style: '', youtube: '' });
+            const [tapTimes, setTapTimes] = useState([]);
+
+            const [transpose, setTranspose] = useState(0);
+            const [isScrolling, setIsScrolling] = useState(false);
+            const [scrollSpeed, setScrollSpeed] = useState(2);
+            const [isMetronomeOn, setIsMetronomeOn] = useState(false);
+            const [currentBpm, setCurrentBpm] = useState(120);
+            const [beat, setBeat] = useState(0);
+            const [showVideo, setShowVideo] = useState(false);
+
+            // Ref untuk container scrolling
+            const scrollRef = useRef(null);
+            const scrollPosRef = useRef(0); // Menyimpan posisi scroll desimal untuk kehalusan
             const audioCtx = useRef(null);
             const fileInputRef = useRef(null);
 
-            const showStatus = (msg) => {
-                setStatusMsg(msg);
-                setTimeout(() => setStatusMsg(null), 3000);
+            useEffect(() => {
+                localStorage.setItem('ronz_songs', JSON.stringify(songs));
+            }, [songs]);
+
+            const notify = (msg) => {
+                setStatus(msg);
+                setTimeout(() => setStatus(null), 3000);
+            };
+
+            const transposeChord = useCallback((chordLine, steps) => {
+                if (steps === 0) return chordLine;
+                const chordRegex = /[A-G][#b]?(?:m|maj|min|dim|aug|sus|add|7|9|11|13|sus4|sus2|maj7)?(?:\/[A-G][#b]?)?/gi;
+                return chordLine.replace(chordRegex, (chord) => {
+                    return chord.replace(/[A-G][#b]?/g, (root) => {
+                        let r = FLAT_MAP[root] || root;
+                        let idx = CHROMATIC.indexOf(r.toUpperCase());
+                        if (idx === -1) return root;
+                        let newIdx = (idx + steps) % 12;
+                        if (newIdx < 0) newIdx += 12;
+                        return CHROMATIC[newIdx];
+                    });
+                });
+            }, []);
+
+            const isChordLine = (line) => {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.length > 80) return false;
+                const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+                if (words.length === 0) return false;
+                const chordRegex = /^[A-G][#b]?(?:m|maj|min|dim|aug|sus|add|7|9|11|13|sus4|sus2|maj7)?(?:\/[A-G][#b]?)?$|^\|$/i;
+                return words.every(w => chordRegex.test(w) || w === '|' || w === '-' || w === '·' || w === ':' || w === '.');
+            };
+
+            const isStructureLine = (line) => {
+                const trimmed = line.trim().toLowerCase();
+                const structures = ['intro', 'verse', 'chorus', 'reff', 'bridge', 'outro', 'ending', 'coda', 'interlude', 'solo', 'pre-chorus', 'pre-reff'];
+                return structures.some(s => trimmed.startsWith(s) || (trimmed.startsWith('[') && trimmed.includes(s)));
+            };
+
+            // Metronome logic
+            useEffect(() => {
+                let timer;
+                if (isMetronomeOn) {
+                    if (!audioCtx.current) audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+                    const interval = 60000 / currentBpm;
+                    timer = setInterval(() => {
+                        const osc = audioCtx.current.createOscillator();
+                        const gain = audioCtx.current.createGain();
+                        osc.frequency.setValueAtTime(beat % 4 === 0 ? 1000 : 500, audioCtx.current.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.current.currentTime + 0.1);
+                        osc.connect(gain); gain.connect(audioCtx.current.destination);
+                        osc.start(); osc.stop(audioCtx.current.currentTime + 0.1);
+                        setBeat(b => b + 1);
+                    }, interval);
+                }
+                return () => clearInterval(timer);
+            }, [isMetronomeOn, currentBpm, beat]);
+
+            // FIXED: Improved Autoscroll Logic
+            useEffect(() => {
+                let animationFrameId;
+                
+                const scrollStep = () => {
+                    if (isScrolling && scrollRef.current) {
+                        const container = scrollRef.current;
+                        
+                        // Cek jika sudah mencapai batas bawah
+                        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 5) {
+                            setIsScrolling(false);
+                            return;
+                        }
+
+                        // Update posisi desimal untuk animasi yang smooth (sub-pixel scrolling)
+                        // Pembagian 60 karena target 60fps
+                        scrollPosRef.current += (scrollSpeed / 2); 
+                        container.scrollTop = Math.floor(scrollPosRef.current);
+                        
+                        animationFrameId = requestAnimationFrame(scrollStep);
+                    }
+                };
+
+                if (isScrolling) {
+                    // Reset posisi virtual ke posisi scroll saat ini agar sinkron
+                    if (scrollRef.current) scrollPosRef.current = scrollRef.current.scrollTop;
+                    animationFrameId = requestAnimationFrame(scrollStep);
+                }
+
+                return () => {
+                    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+                };
+            }, [isScrolling, scrollSpeed]);
+
+            // Sync virtual scroll position when user manually scrolls
+            const handleManualScroll = () => {
+                if (scrollRef.current) {
+                    scrollPosRef.current = scrollRef.current.scrollTop;
+                }
+            };
+
+            const exportData = () => {
+                const data = JSON.stringify({ songs }, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ronz_backup_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+                notify("Data diekspor!");
+            };
+
+            const importData = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        if (data.songs) setSongs(data.songs);
+                        notify("Data berhasil diimpor!");
+                    } catch (err) { notify("Gagal mengimpor file!"); }
+                };
+                reader.readAsText(file);
             };
 
             const handleTap = () => {
@@ -119,353 +245,255 @@
                 const newTaps = [...tapTimes, now].slice(-4);
                 setTapTimes(newTaps);
                 if (newTaps.length > 1) {
-                    const avgInterval = (newTaps[newTaps.length-1] - newTaps[0]) / (newTaps.length-1);
-                    const calculatedBpm = Math.round(60000 / avgInterval);
-                    setFormData(prev => ({ ...prev, tempo: calculatedBpm }));
+                    const avg = (newTaps[newTaps.length-1] - newTaps[0]) / (newTaps.length-1);
+                    const bpm = Math.round(60000 / avg);
+                    setForm(f => ({ ...f, tempo: bpm }));
                 }
             };
 
-            useEffect(() => {
-                let timer;
-                if (isMetronomeActive) {
-                    if (!audioCtx.current) audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
-                    const interval = 60000 / bpm;
-                    timer = setInterval(() => {
-                        const osc = audioCtx.current.createOscillator();
-                        const env = audioCtx.current.createGain();
-                        osc.frequency.setValueAtTime(beatCounter % 4 === 0 ? 880 : 440, audioCtx.current.currentTime);
-                        env.gain.exponentialRampToValueAtTime(0.001, audioCtx.current.currentTime + 0.1);
-                        osc.connect(env); env.connect(audioCtx.current.destination);
-                        osc.start(); osc.stop(audioCtx.current.currentTime + 0.1);
-                        setBeatCounter(c => c + 1);
-                    }, interval);
-                }
-                return () => clearInterval(timer);
-            }, [isMetronomeActive, bpm, beatCounter]);
-
-            const exportToJson = () => {
-                const dataStr = JSON.stringify({ songs, setlists }, null, 2);
-                const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-                const link = document.createElement('a');
-                link.setAttribute('href', dataUri);
-                link.setAttribute('download', `chordpro-backup.json`);
-                link.click();
-                showStatus("Data diekspor!");
-            };
-
-            const handleImport = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    try {
-                        const data = JSON.parse(event.target.result);
-                        setSongs(data.songs || []);
-                        setSetlists(data.setlists || []);
-                        showStatus("Data diimpor!");
-                    } catch { showStatus("Gagal impor!"); }
-                };
-                reader.readAsText(file);
-            };
-
-            const saveSong = (e) => {
-                e.preventDefault();
-                if (editingSongId) {
-                    // Update lagu yang sudah ada
-                    const updatedSongs = songs.map(s => s.id === editingSongId ? { ...formData, id: editingSongId } : s);
-                    setSongs(updatedSongs);
-                    // Update viewingSong jika sedang dibuka
-                    if (viewingSong?.id === editingSongId) setViewingSong({ ...formData, id: editingSongId });
-                    showStatus("Lagu diperbarui!");
+            const handleSave = () => {
+                if (!form.title || !form.content) return notify("Judul & Isi wajib diisi!");
+                const newSong = { ...form, id: form.id || Date.now().toString() };
+                if (form.id) {
+                    setSongs(songs.map(s => s.id === form.id ? newSong : s));
                 } else {
-                    // Simpan lagu baru
-                    setSongs([{ ...formData, id: Date.now().toString() }, ...songs]);
-                    showStatus("Lagu disimpan!");
+                    setSongs([newSong, ...songs]);
                 }
-                resetForm();
+                setView('library');
+                notify("Lagu disimpan");
             };
 
-            const resetForm = () => {
-                setFormData({ title: '', artist: '', style: '', content: '', tempo: 120, key: 'C', youtube: '' });
-                setIsAdding(false);
-                setEditingSongId(null);
+            const openStage = (song) => {
+                setActiveSong(song);
+                setCurrentBpm(song.tempo || 120);
+                setTranspose(0);
+                setIsScrolling(false);
+                setShowVideo(false);
+                setView('stage');
+                // Reset scroll position ref
+                scrollPosRef.current = 0;
             };
 
-            const handleEditClick = (song) => {
-                setFormData({
-                    title: song.title,
-                    artist: song.artist,
-                    style: song.style || '',
-                    content: song.content,
-                    tempo: song.tempo || 120,
-                    key: song.key || 'C',
-                    youtube: song.youtube || ''
-                });
-                setEditingSongId(song.id);
-                setIsAdding(true);
-            };
-
-            const deleteSong = (id) => {
-                if (confirm("Hapus lagu ini?")) {
-                    setSongs(songs.filter(s => s.id !== id));
-                    setViewingSong(null);
-                    showStatus("Lagu dihapus");
-                }
-            };
-
-            const createSetlist = () => {
-                if (!setlistName) return;
-                setSetlists([{ id: Date.now().toString(), name: setlistName, songIds: selectedSongs }, ...setlists]);
-                setSetlistName(''); setSelectedSongs([]); setIsAddingSetlist(false);
-                showStatus("Setlist dibuat!");
+            const getYouTubeEmbed = (url) => {
+                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+                const match = url?.match(regExp);
+                return (match && match[2].length === 11) ? match[2] : null;
             };
 
             const filteredSongs = useMemo(() => {
                 return songs.filter(s => 
                     s.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                    s.artist.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    (s.style && s.style.toLowerCase().includes(searchTerm.toLowerCase()))
+                    s.artist.toLowerCase().includes(searchTerm.toLowerCase())
                 );
             }, [songs, searchTerm]);
 
             return (
-                <div className="min-h-screen bg-zinc-950 text-zinc-100">
-                    {statusMsg && <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[300] bg-indigo-600 px-6 py-2 rounded-full font-bold shadow-2xl animate-bounce text-sm">{statusMsg}</div>}
-                    <input type="file" ref={fileInputRef} onChange={handleImport} className="hidden" accept=".json" />
-
-                    <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 p-4">
-                        <div className="max-w-5xl mx-auto flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                                <div className="bg-indigo-600 p-2 rounded-lg text-white"><Icon name="Music" size={20} /></div>
-                                <h1 className="font-black uppercase tracking-tighter text-lg hidden sm:block">RoNz Chord Pro</h1>
-                            </div>
-                            
-                            <div className="flex bg-zinc-900 p-1 rounded-xl border border-zinc-800">
-                                <button onClick={() => setActiveTab('library')} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${activeTab === 'library' ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}>Lagu</button>
-                                <button onClick={() => setActiveTab('setlists')} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${activeTab === 'setlists' ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}>Setlist</button>
-                            </div>
-
-                            <div className="flex gap-2">
-                                <button onClick={() => setIsHelpOpen(true)} className="p-2 bg-zinc-900 rounded-xl text-zinc-400 hover:text-white"><Icon name="HelpCircle" size={20}/></button>
-                                <button onClick={() => fileInputRef.current.click()} className="p-2 bg-zinc-900 rounded-xl text-zinc-400 hover:text-white"><Icon name="Upload" size={20}/></button>
-                                <button onClick={exportToJson} className="p-2 bg-zinc-900 rounded-xl text-zinc-400 hover:text-white"><Icon name="Download" size={20}/></button>
-                                <button onClick={() => activeTab === 'library' ? setIsAdding(true) : setIsAddingSetlist(true)} className="bg-indigo-600 p-2 rounded-xl text-white ml-2"><Icon name="Plus" size={20}/></button>
-                            </div>
+                <div className="flex flex-col min-h-screen">
+                    <input type="file" ref={fileInputRef} className="hidden" onChange={importData} accept=".json" />
+                    
+                    {status && (
+                        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[2000] bg-white text-black px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-4">
+                            <Icon name="CheckCircle" className="text-indigo-600" /> {status}
                         </div>
-                    </header>
+                    )}
 
-                    <main className="max-w-5xl mx-auto p-4 md:p-8">
-                        {activeTab === 'library' ? (
-                            <>
-                                <input type="text" placeholder="Cari judul, artis, atau style..." className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-4 px-6 mb-8 outline-none focus:ring-2 ring-indigo-500/50" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {filteredSongs.map(song => (
-                                        <div key={song.id} onClick={() => { setViewingSong(song); setBpm(song.tempo); setTransposeValue(0); setShowVideo(false); }} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-[2rem] hover:border-indigo-500/50 transition-all cursor-pointer group relative">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <h3 className="font-black uppercase text-lg group-hover:text-indigo-400 truncate pr-6">{song.title}</h3>
-                                                {song.youtube && <Icon name="Youtube" size={16} className="text-red-500"/>}
-                                            </div>
-                                            <p className="text-sm text-zinc-500 mb-4 flex justify-between">
-                                                <span>{song.artist}</span>
-                                                {song.style && <span className="italic opacity-60">#{song.style}</span>}
-                                            </p>
-                                            <div className="flex gap-2 text-[10px] font-black uppercase">
-                                                <span className="bg-zinc-800 px-2 py-1 rounded text-zinc-400">{song.tempo} BPM</span>
-                                                <span className="bg-zinc-800 px-2 py-1 rounded text-indigo-400">{song.key}</span>
-                                            </div>
-                                            {/* Quick Edit Overlay for desktop */}
-                                            <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                 <button onClick={(e) => { e.stopPropagation(); handleEditClick(song); }} className="p-2 bg-zinc-800/80 rounded-lg hover:text-indigo-400">
-                                                    <Icon name="Edit2" size={14}/>
-                                                 </button>
-                                            </div>
-                                        </div>
-                                    ))}
+                    {view !== 'stage' && (
+                        <header className="sticky top-0 z-50 glass-panel border-b border-zinc-800 p-4">
+                            <div className="max-w-6xl mx-auto flex justify-between items-center">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                                        <Icon name="Zap" className="text-white" />
+                                    </div>
+                                    <div className="leading-tight">
+                                        <h1 className="font-black text-xl tracking-tighter uppercase hidden sm:block">RoNz</h1>
+                                        <p className="text-[10px] font-bold text-zinc-500 tracking-[0.2em] hidden sm:block uppercase">CHORD PRO</p>
+                                    </div>
                                 </div>
-                            </>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {setlists.map(sl => (
-                                    <div key={sl.id} className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-[2rem]">
-                                        <h3 className="font-black uppercase text-xl mb-1">{sl.name}</h3>
-                                        <p className="text-[10px] font-bold text-zinc-500 uppercase mb-4">{sl.songIds.length} Lagu</p>
-                                        <button onClick={() => setActiveSetlist(sl)} className="w-full bg-zinc-800 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-600 transition-all">Buka Setlist</button>
+                                
+                                <div className="flex gap-1.5 sm:gap-2">
+                                    <button onClick={() => fileInputRef.current.click()} className="p-2.5 bg-zinc-800 text-zinc-400 rounded-xl hover:text-white" title="Impor"><Icon name="Upload" size={18}/></button>
+                                    <button onClick={exportData} className="p-2.5 bg-zinc-800 text-zinc-400 rounded-xl hover:text-white" title="Ekspor"><Icon name="Download" size={18}/></button>
+                                    <div className="w-[1px] h-10 bg-zinc-800 mx-1"></div>
+                                    <button onClick={() => { setForm({ title: '', artist: '', content: '', tempo: 120, key: 'C', style: '', youtube: '' }); setView('editor'); }} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-indigo-500 transition-all">Baru</button>
+                                </div>
+                            </div>
+                        </header>
+                    )}
+
+                    {view === 'library' && (
+                        <main className="max-w-6xl mx-auto w-full p-6 space-y-8 animate-in fade-in duration-500">
+                            <div className="relative group">
+                                <Icon name="Search" className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-white transition-colors" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Cari lagu atau artis..." 
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-5 pl-14 pr-6 outline-none focus:border-indigo-500 transition-all font-semibold"
+                                    value={searchTerm}
+                                    onChange={e => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {filteredSongs.map(song => (
+                                    <div 
+                                        key={song.id} 
+                                        className="group bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-[2rem] hover:border-indigo-500 transition-all cursor-pointer relative overflow-hidden shadow-sm"
+                                        onClick={() => openStage(song)}
+                                    >
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="max-w-[80%]">
+                                                <h3 className="font-extrabold text-xl uppercase leading-tight truncate group-hover:text-indigo-400 transition-colors">{song.title}</h3>
+                                                <p className="text-sm text-zinc-500 font-medium truncate">{song.artist}</p>
+                                            </div>
+                                            <div className="text-indigo-500 font-black text-lg">{song.key}</div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            <span className="bg-zinc-800/80 text-[10px] font-bold px-3 py-1 rounded-full text-zinc-400">{song.style || 'Song'}</span>
+                                            <span className="bg-zinc-800/80 text-[10px] font-bold px-3 py-1 rounded-full text-zinc-400">{song.tempo} BPM</span>
+                                        </div>
+                                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
+                                            <button onClick={(e) => { e.stopPropagation(); setForm(song); setView('editor'); }} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white"><Icon name="Edit" size={16} /></button>
+                                            <button onClick={(e) => { e.stopPropagation(); if(confirm('Hapus lagu ini?')) setSongs(songs.filter(s => s.id !== song.id)); }} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-red-500"><Icon name="Trash2" size={16} /></button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
-                        )}
-                    </main>
+                        </main>
+                    )}
 
-                    {/* View Song Modal */}
-                    {viewingSong && (
-                        <div className="fixed inset-0 z-[150] bg-zinc-950 flex flex-col animate-in slide-in-from-bottom-4">
-                            <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-zinc-900/50">
-                                <div className="flex items-center gap-4">
-                                    <button onClick={() => { setViewingSong(null); setIsMetronomeActive(false); }} className="p-2 bg-zinc-900 rounded-xl"><Icon name="ArrowLeft" size={20}/></button>
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <h2 className="font-black uppercase text-lg leading-tight">{viewingSong.title}</h2>
-                                            {viewingSong.style && <span className="text-[9px] bg-zinc-800 px-2 py-0.5 rounded text-zinc-500 font-bold uppercase">{viewingSong.style}</span>}
-                                        </div>
-                                        <p className="text-[10px] font-bold text-zinc-500 uppercase">{viewingSong.artist}</p>
+                    {view === 'editor' && (
+                        <main className="max-w-4xl mx-auto w-full p-6 animate-in slide-in-from-bottom-8 duration-500 pb-20">
+                            <div className="glass-panel p-8 rounded-[3rem] border-zinc-800 shadow-2xl space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Judul</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder="Judul lagu" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Artis</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.artist} onChange={e => setForm({...form, artist: e.target.value})} placeholder="Nama artis" />
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <button onClick={() => handleEditClick(viewingSong)} className="p-2 bg-zinc-900 rounded-xl hover:text-indigo-400"><Icon name="Edit3" size={18}/></button>
-                                    {viewingSong.youtube && <button onClick={() => setShowVideo(!showVideo)} className={`p-2 rounded-xl ${showVideo ? 'bg-red-600' : 'bg-zinc-900'}`}><Icon name="Youtube" size={18}/></button>}
-                                    {isMetronomeActive && (
-                                        <div className="relative w-6 h-6 flex items-center justify-center">
-                                            <div key={beatCounter} className="absolute w-full h-full bg-indigo-500 rounded-full animate-beat"></div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Nada Dasar</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold" value={form.key} onChange={e => setForm({...form, key: e.target.value})} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Tempo (BPM)</label>
+                                        <div className="relative">
+                                            <input type="number" className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold pr-12" value={form.tempo} onChange={e => setForm({...form, tempo: parseInt(e.target.value) || 0})} />
+                                            <button onClick={handleTap} className="absolute right-2 top-2 bottom-2 bg-indigo-600 px-2 rounded-lg text-[9px] font-bold uppercase">Tap</button>
                                         </div>
-                                    )}
-                                    <button onClick={() => setIsMetronomeActive(!isMetronomeActive)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase ${isMetronomeActive ? 'bg-indigo-600' : 'bg-zinc-800 text-zinc-500'}`}>
-                                        {isMetronomeActive ? `${bpm} BPM` : 'Metronome'}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Style</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold" value={form.style} onChange={e => setForm({...form, style: e.target.value})} placeholder="Genre" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">YouTube Link</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold" value={form.youtube} onChange={e => setForm({...form, youtube: e.target.value})} placeholder="URL Video" />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Isi Lagu (Lirik & Chord)</label>
+                                    <textarea 
+                                        className="w-full bg-zinc-800/50 border border-zinc-700/50 p-6 rounded-3xl outline-none focus:border-indigo-500 transition-all font-mono text-sm leading-relaxed min-h-[400px]"
+                                        value={form.content}
+                                        onChange={e => setForm({...form, content: e.target.value})}
+                                        placeholder="Tulis lirik dan chord. Gunakan [Intro], [Chorus], dll."
+                                    ></textarea>
+                                </div>
+                                <div className="flex gap-4 pt-4">
+                                    <button onClick={() => setView('library')} className="flex-1 bg-zinc-800 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-zinc-700 transition-all">Batal</button>
+                                    <button onClick={handleSave} className="flex-1 bg-indigo-600 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-indigo-500 shadow-xl shadow-indigo-600/30 transition-all">Simpan</button>
+                                </div>
+                            </div>
+                        </main>
+                    )}
+
+                    {view === 'stage' && activeSong && (
+                        <div className="fixed inset-0 bg-black z-[100] flex flex-col animate-in fade-in duration-300">
+                            {/* Header Kontrol */}
+                            <div className="glass-panel border-b border-zinc-900 p-4 px-6 flex justify-between items-center shrink-0">
+                                <div className="flex items-center gap-4 max-w-[50%]">
+                                    <button onClick={() => setView('library')} className="w-10 h-10 bg-zinc-900 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors shrink-0"><Icon name="ArrowLeft" /></button>
+                                    <div className="truncate">
+                                        <h2 className="font-black text-xl uppercase tracking-tighter leading-none truncate">{activeSong.title}</h2>
+                                        <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{activeSong.artist}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 sm:gap-3">
+                                    <div className="hidden md:flex items-center gap-2 bg-zinc-900 px-3 py-2 rounded-xl">
+                                        <Icon name="ChevronDown" size={14} className="text-zinc-600" />
+                                        <input type="range" min="0.1" max="5" step="0.1" value={scrollSpeed} onChange={e => setScrollSpeed(parseFloat(e.target.value))} className="w-20" />
+                                    </div>
+                                    <button onClick={() => setIsScrolling(!isScrolling)} className={`p-2.5 rounded-xl transition-all ${isScrolling ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-zinc-500'}`} title="Auto Scroll">
+                                        <Icon name={isScrolling ? "Pause" : "Play"} size={18} />
                                     </button>
-                                    <button onClick={() => { setViewingSong(null); setIsMetronomeActive(false); }} className="p-2 bg-zinc-900 rounded-xl"><Icon name="X" size={20}/></button>
-                                </div>
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-6 md:p-12 no-scrollbar">
-                                <div className="max-w-3xl mx-auto">
-                                    {showVideo && viewingSong.youtube && (
-                                        <div className="mb-8 aspect-video w-full rounded-[2rem] overflow-hidden border border-zinc-800 shadow-2xl">
-                                            <iframe className="w-full h-full" src={`https://www.youtube.com/embed/${getYoutubeId(viewingSong.youtube)}`} frameBorder="0" allowFullScreen></iframe>
-                                        </div>
+                                    <button onClick={() => setIsMetronomeOn(!isMetronomeOn)} className={`p-2.5 rounded-xl transition-all ${isMetronomeOn ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-zinc-500'}`} title="Metronome">
+                                        <Icon name="Activity" size={18} />
+                                    </button>
+                                    {getYouTubeEmbed(activeSong.youtube) && (
+                                        <button onClick={() => setShowVideo(!showVideo)} className={`p-2.5 rounded-xl transition-all ${showVideo ? 'bg-red-600 text-white' : 'bg-zinc-900 text-zinc-500'}`} title="YouTube"><Icon name="Youtube" size={18} /></button>
                                     )}
-                                    <div className="flex gap-4 mb-8">
-                                        <div className="flex-1 bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex justify-between items-center">
-                                            <span className="text-[10px] font-black uppercase text-zinc-500">Transpose</span>
-                                            <div className="flex items-center gap-3">
-                                                <button onClick={() => setTransposeValue(v => v-1)} className="p-1 bg-zinc-800 rounded"><Icon name="Minus" size={14}/></button>
-                                                <span className="text-indigo-400 font-bold w-4 text-center">{transposeValue}</span>
-                                                <button onClick={() => setTransposeValue(v => v+1)} className="p-1 bg-zinc-800 rounded"><Icon name="Plus" size={14}/></button>
-                                            </div>
-                                        </div>
-                                        <div className="flex-1 bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex justify-between items-center">
-                                            <span className="text-[10px] font-black uppercase text-zinc-500">BPM</span>
-                                            <input type="number" value={bpm} onChange={e => setBpm(parseInt(e.target.value))} className="bg-transparent text-right font-bold text-indigo-400 w-16 outline-none"/>
-                                        </div>
-                                    </div>
-                                    <div className="bg-zinc-900/20 p-8 rounded-[2rem] border border-zinc-900/50 font-mono text-lg whitespace-pre-wrap leading-relaxed">
-                                        {viewingSong.content.split('\n').map((line, i) => (
-                                            <div key={i} className={isChordLine(line) ? "text-indigo-400 font-bold mb-1" : "text-zinc-500 mb-4"}>
-                                                {isChordLine(line) ? transposeChord(line, transposeValue) : line}
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="mt-12 pt-8 border-t border-zinc-900 flex justify-center">
-                                        <button onClick={() => deleteSong(viewingSong.id)} className="flex items-center gap-2 text-red-500/50 hover:text-red-500 text-[10px] font-black uppercase tracking-widest transition-all">
-                                            <Icon name="Trash2" size={14}/> Hapus Lagu
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
 
-                    {/* Setlist Viewer */}
-                    {activeSetlist && (
-                        <div className="fixed inset-0 z-[120] bg-zinc-950 flex flex-col">
-                            <div className="p-4 border-b border-zinc-900 flex justify-between items-center">
-                                <h2 className="font-black uppercase text-xl">Setlist: {activeSetlist.name}</h2>
-                                <button onClick={() => setActiveSetlist(null)} className="p-2 bg-zinc-900 rounded-xl"><Icon name="X" size={24}/></button>
-                            </div>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                                {activeSetlist.songIds.map((sid, idx) => {
-                                    const song = songs.find(s => s.id === sid);
-                                    if(!song) return null;
-                                    return (
-                                        <div key={sid} onClick={() => setViewingSong(song)} className="flex items-center gap-4 bg-zinc-900 p-5 rounded-2xl border border-zinc-800 cursor-pointer hover:border-indigo-500/50 transition-all">
-                                            <div className="w-8 h-8 flex items-center justify-center bg-indigo-600 rounded-full font-black text-xs">{idx+1}</div>
-                                            <div className="flex-1">
-                                                <h4 className="font-black uppercase text-sm">{song.title}</h4>
-                                                <p className="text-[10px] text-zinc-500 uppercase">{song.artist} • {song.key} {song.style && `• ${song.style}`}</p>
-                                            </div>
-                                            <Icon name="ChevronRight" size={16} className="text-zinc-600" />
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
+                            {/* Konten Utama */}
+                            <div className="flex-1 flex overflow-hidden relative">
+                                <div 
+                                    ref={scrollRef} 
+                                    onScroll={handleManualScroll}
+                                    className={`flex-1 overflow-y-auto p-8 md:p-16 lg:px-32 pb-60 no-scrollbar transition-all ${showVideo ? 'md:w-2/3' : 'w-full'}`}
+                                >
+                                    <div className="max-w-5xl mx-auto space-y-0 text-xl md:text-3xl lg:text-4xl">
+                                        {activeSong.content.split('\n').map((line, idx) => {
+                                            const chordLine = isChordLine(line);
+                                            const structureLine = isStructureLine(line);
+                                            
+                                            let className = "lyrics-line";
+                                            if (chordLine) className = "chord-line";
+                                            if (structureLine) className = "structure-line";
 
-                    {/* Add/Edit Song Modal */}
-                    {isAdding && (
-                        <div className="fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-4">
-                            <div className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl rounded-[2.5rem] p-8 max-h-[90vh] overflow-y-auto no-scrollbar">
-                                <h2 className="font-black uppercase tracking-widest text-indigo-500 mb-6">
-                                    {editingSongId ? 'Edit Lagu' : 'Tambah Lagu Baru'}
-                                </h2>
-                                <form onSubmit={saveSong} className="space-y-4">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <input required placeholder="Judul" className="w-full bg-zinc-800 p-4 rounded-xl outline-none border border-transparent focus:border-indigo-500" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} />
-                                        <input required placeholder="Artis" className="w-full bg-zinc-800 p-4 rounded-xl outline-none border border-transparent focus:border-indigo-500" value={formData.artist} onChange={e => setFormData({...formData, artist: e.target.value})} />
+                                            return (
+                                                <pre key={idx} className={className}>
+                                                    {chordLine ? transposeChord(line, transpose) : (line || ' ')}
+                                                </pre>
+                                            );
+                                        })}
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <input placeholder="Style (misal: Pop, Rock, Reggae)" className="w-full bg-zinc-800 p-4 rounded-xl outline-none border border-transparent focus:border-indigo-500" value={formData.style} onChange={e => setFormData({...formData, style: e.target.value})} />
-                                        <input placeholder="Original Key" className="w-full bg-zinc-800 p-4 rounded-xl outline-none border border-transparent focus:border-indigo-500" value={formData.key} onChange={e => setFormData({...formData, key: e.target.value})} />
-                                    </div>
-                                    <div className="grid grid-cols-1 gap-4">
-                                        <div className="flex gap-2">
-                                            <div className="flex-1 bg-zinc-800 rounded-xl flex items-center px-4">
-                                                <span className="text-[10px] font-black uppercase text-zinc-500 mr-2">BPM:</span>
-                                                <input type="number" className="flex-1 bg-transparent py-4 outline-none" value={formData.tempo} onChange={e => setFormData({...formData, tempo: parseInt(e.target.value)})}/>
-                                            </div>
-                                            <button type="button" onClick={handleTap} className="bg-indigo-600 px-6 rounded-xl font-black text-[10px] uppercase hover:bg-indigo-500 active:scale-95 transition-all">Tap Tempo</button>
-                                        </div>
-                                    </div>
-                                    <input placeholder="YouTube URL (Opsional)" className="w-full bg-zinc-800 p-4 rounded-xl outline-none border border-transparent focus:border-indigo-500" value={formData.youtube} onChange={e => setFormData({...formData, youtube: e.target.value})} />
-                                    <textarea required rows="10" placeholder="Tulis Lirik & Chord..." className="w-full bg-zinc-800 p-4 rounded-xl outline-none font-mono text-sm resize-none border border-transparent focus:border-indigo-500" value={formData.content} onChange={e => setFormData({...formData, content: e.target.value})}></textarea>
-                                    <div className="flex gap-3 pt-4">
-                                        <button type="button" onClick={resetForm} className="flex-1 py-4 rounded-xl font-black uppercase text-[10px] text-zinc-500 bg-zinc-800">Batal</button>
-                                        <button type="submit" className="flex-1 py-4 rounded-xl font-black uppercase text-[10px] bg-indigo-600">
-                                            {editingSongId ? 'Perbarui Lagu' : 'Simpan Lagu'}
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Modals lainnya (Setlist, Help) tetap sama */}
-                    {isAddingSetlist && (
-                        <div className="fixed inset-0 z-[200] bg-black/95 flex items-center justify-center p-4">
-                            <div className="bg-zinc-900 border border-zinc-800 w-full max-w-xl rounded-[2rem] p-8 max-h-[80vh] flex flex-col">
-                                <h2 className="font-black uppercase tracking-widest text-indigo-500 mb-6">Buat Setlist</h2>
-                                <input placeholder="Nama Setlist..." className="bg-zinc-800 p-4 rounded-xl outline-none mb-4" value={setlistName} onChange={e => setlistName(e.target.value)} />
-                                <div className="flex-1 overflow-y-auto space-y-2 mb-6 no-scrollbar pr-2">
-                                    {songs.map(song => (
-                                        <div key={song.id} onClick={() => setSelectedSongs(s => s.includes(song.id) ? s.filter(id => id !== song.id) : [...s, song.id])} className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${selectedSongs.includes(song.id) ? 'bg-indigo-600/20 border-indigo-500' : 'bg-zinc-800 border-transparent'}`}>
-                                            <span className="font-bold text-xs truncate">{song.title}</span>
-                                            {selectedSongs.includes(song.id) && <Icon name="Check" size={14} className="text-indigo-500"/>}
-                                        </div>
-                                    ))}
                                 </div>
-                                <button onClick={createSetlist} className="w-full bg-indigo-600 py-4 rounded-xl font-black uppercase text-[10px]">Simpan Setlist</button>
-                            </div>
-                        </div>
-                    )}
 
-                    {isHelpOpen && (
-                        <div className="fixed inset-0 z-[300] bg-black/95 flex items-center justify-center p-4" onClick={() => setIsHelpOpen(false)}>
-                            <div className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl rounded-[2rem] p-10 space-y-6 overflow-y-auto max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                                <h2 className="font-black uppercase tracking-widest text-indigo-500 text-xl border-b border-zinc-800 pb-4">Panduan Pengguna</h2>
-                                <div className="space-y-6 text-sm text-zinc-400">
-                                    <section>
-                                        <h4 className="text-white font-black uppercase text-xs mb-2">Mengedit Lagu</h4>
-                                        <p>Klik ikon pensil di pojok kartu lagu atau di dalam detail lagu untuk mengubah data. Klik "Perbarui Lagu" untuk menyimpan perubahan.</p>
-                                    </section>
-                                    <section>
-                                        <h4 className="text-white font-black uppercase text-xs mb-2">Menghapus Lagu</h4>
-                                        <p>Tombol hapus tersedia di bagian bawah detail lagu (setelah digulir ke bawah).</p>
-                                    </section>
+                                {showVideo && getYouTubeEmbed(activeSong.youtube) && (
+                                    <div className="hidden md:block w-1/3 border-l border-zinc-900 bg-zinc-950 p-4 animate-in slide-in-from-right duration-300">
+                                        <div className="sticky top-4 aspect-video bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
+                                            <iframe width="100%" height="100%" src={`https://www.youtube.com/embed/${getYouTubeEmbed(activeSong.youtube)}?autoplay=1`} frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen></iframe>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Toolbar Bawah */}
+                            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel p-2 px-6 rounded-full z-[110] flex items-center gap-6 shadow-2xl border-zinc-700/50">
+                                <div className="flex items-center gap-4">
+                                    <span className="text-[9px] font-black uppercase text-zinc-500 hidden sm:inline">Transpose</span>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={() => setTranspose(t => t - 1)} className="w-8 h-8 bg-zinc-800 rounded-lg flex items-center justify-center hover:bg-zinc-700"><Icon name="Minus" size={14}/></button>
+                                        <span className={`w-8 text-center font-black text-lg ${transpose !== 0 ? 'text-indigo-400' : ''}`}>{transpose > 0 ? `+${transpose}` : transpose}</span>
+                                        <button onClick={() => setTranspose(t => t + 1)} className="w-8 h-8 bg-zinc-800 rounded-lg flex items-center justify-center hover:bg-zinc-700"><Icon name="Plus" size={14}/></button>
+                                    </div>
                                 </div>
-                                <button onClick={() => setIsHelpOpen(false)} className="w-full bg-zinc-800 py-4 rounded-xl font-black uppercase text-[10px]">Tutup</button>
+                                <div className="w-[1px] h-6 bg-zinc-800"></div>
+                                <button onClick={() => { setForm(activeSong); setView('editor'); }} className="p-2 text-zinc-500 hover:text-indigo-400" title="Edit"><Icon name="Edit" size={18} /></button>
+                                <button onClick={() => window.print()} className="p-2 text-zinc-500 hover:text-white" title="Cetak"><Icon name="Printer" size={18} /></button>
                             </div>
                         </div>
                     )}
                 </div>
             );
-        }
+        };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
