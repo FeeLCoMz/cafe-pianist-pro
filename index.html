@@ -19,14 +19,14 @@
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--bg-main); color: #f4f4f5; overflow-x: hidden; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         
-        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
         
         pre {
             font-family: 'JetBrains Mono', monospace;
-            white-space: pre-wrap;
-            word-wrap: break-word;
+            white-space: pre; 
+            word-wrap: normal;
             margin: 0;
             padding: 0;
         }
@@ -51,14 +51,13 @@
             border: 1px solid rgba(63, 63, 70, 0.4);
         }
 
-        @keyframes beat {
-            0%, 100% { transform: scale(1); opacity: 1; }
-            50% { transform: scale(1.4); opacity: 0.5; }
-        }
-        .animate-metronome { animation: beat 0.1s ease-out; }
-
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
+        .song-container {
+            overflow-x: auto;
+            width: 100%;
+        }
+
         @media print {
             .glass-panel, button, input, header, .fixed { display: none !important; }
             body { background: white; color: black; }
@@ -66,7 +65,7 @@
             .chord-line { color: #444; }
             .structure-line { color: black; border-bottom: 1px solid #ccc; }
             #root > div { display: block !important; }
-            pre { font-size: 12pt; }
+            pre { font-size: 12pt; white-space: pre-wrap; }
         }
     </style>
 </head>
@@ -100,8 +99,6 @@
             const [status, setStatus] = useState(null);
 
             const [form, setForm] = useState({ title: '', artist: '', content: '', tempo: 120, key: 'C', style: '', youtube: '' });
-            const [tapTimes, setTapTimes] = useState([]);
-
             const [transpose, setTranspose] = useState(0);
             const [isScrolling, setIsScrolling] = useState(false);
             const [scrollSpeed, setScrollSpeed] = useState(2);
@@ -110,9 +107,8 @@
             const [beat, setBeat] = useState(0);
             const [showVideo, setShowVideo] = useState(false);
 
-            // Ref untuk container scrolling
             const scrollRef = useRef(null);
-            const scrollPosRef = useRef(0); // Menyimpan posisi scroll desimal untuk kehalusan
+            const scrollPosRef = useRef(0);
             const audioCtx = useRef(null);
             const fileInputRef = useRef(null);
 
@@ -142,7 +138,7 @@
 
             const isChordLine = (line) => {
                 const trimmed = line.trim();
-                if (!trimmed || trimmed.length > 80) return false;
+                if (!trimmed || trimmed.length > 150) return false;
                 const words = trimmed.split(/\s+/).filter(w => w.length > 0);
                 if (words.length === 0) return false;
                 const chordRegex = /^[A-G][#b]?(?:m|maj|min|dim|aug|sus|add|7|9|11|13|sus4|sus2|maj7)?(?:\/[A-G][#b]?)?$|^\|$/i;
@@ -155,7 +151,6 @@
                 return structures.some(s => trimmed.startsWith(s) || (trimmed.startsWith('[') && trimmed.includes(s)));
             };
 
-            // Metronome logic
             useEffect(() => {
                 let timer;
                 if (isMetronomeOn) {
@@ -174,45 +169,29 @@
                 return () => clearInterval(timer);
             }, [isMetronomeOn, currentBpm, beat]);
 
-            // FIXED: Improved Autoscroll Logic
             useEffect(() => {
                 let animationFrameId;
-                
                 const scrollStep = () => {
                     if (isScrolling && scrollRef.current) {
                         const container = scrollRef.current;
-                        
-                        // Cek jika sudah mencapai batas bawah
                         if (container.scrollTop + container.clientHeight >= container.scrollHeight - 5) {
                             setIsScrolling(false);
                             return;
                         }
-
-                        // Update posisi desimal untuk animasi yang smooth (sub-pixel scrolling)
-                        // Pembagian 60 karena target 60fps
-                        scrollPosRef.current += (scrollSpeed / 2); 
+                        scrollPosRef.current += (scrollSpeed / 2.5); 
                         container.scrollTop = Math.floor(scrollPosRef.current);
-                        
                         animationFrameId = requestAnimationFrame(scrollStep);
                     }
                 };
-
                 if (isScrolling) {
-                    // Reset posisi virtual ke posisi scroll saat ini agar sinkron
                     if (scrollRef.current) scrollPosRef.current = scrollRef.current.scrollTop;
                     animationFrameId = requestAnimationFrame(scrollStep);
                 }
-
-                return () => {
-                    if (animationFrameId) cancelAnimationFrame(animationFrameId);
-                };
+                return () => { if (animationFrameId) cancelAnimationFrame(animationFrameId); };
             }, [isScrolling, scrollSpeed]);
 
-            // Sync virtual scroll position when user manually scrolls
             const handleManualScroll = () => {
-                if (scrollRef.current) {
-                    scrollPosRef.current = scrollRef.current.scrollTop;
-                }
+                if (scrollRef.current) scrollPosRef.current = scrollRef.current.scrollTop;
             };
 
             const exportData = () => {
@@ -240,17 +219,6 @@
                 reader.readAsText(file);
             };
 
-            const handleTap = () => {
-                const now = Date.now();
-                const newTaps = [...tapTimes, now].slice(-4);
-                setTapTimes(newTaps);
-                if (newTaps.length > 1) {
-                    const avg = (newTaps[newTaps.length-1] - newTaps[0]) / (newTaps.length-1);
-                    const bpm = Math.round(60000 / avg);
-                    setForm(f => ({ ...f, tempo: bpm }));
-                }
-            };
-
             const handleSave = () => {
                 if (!form.title || !form.content) return notify("Judul & Isi wajib diisi!");
                 const newSong = { ...form, id: form.id || Date.now().toString() };
@@ -270,14 +238,13 @@
                 setIsScrolling(false);
                 setShowVideo(false);
                 setView('stage');
-                // Reset scroll position ref
                 scrollPosRef.current = 0;
             };
 
-            const getYouTubeEmbed = (url) => {
+            const getYouTubeId = (url) => {
                 const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
                 const match = url?.match(regExp);
-                return (match && match[2].length === 11) ? match[2] : null;
+                return (match && match[2].length === 11) ? match[2] : url;
             };
 
             const filteredSongs = useMemo(() => {
@@ -309,10 +276,9 @@
                                         <p className="text-[10px] font-bold text-zinc-500 tracking-[0.2em] hidden sm:block uppercase">CHORD PRO</p>
                                     </div>
                                 </div>
-                                
                                 <div className="flex gap-1.5 sm:gap-2">
-                                    <button onClick={() => fileInputRef.current.click()} className="p-2.5 bg-zinc-800 text-zinc-400 rounded-xl hover:text-white" title="Impor"><Icon name="Upload" size={18}/></button>
-                                    <button onClick={exportData} className="p-2.5 bg-zinc-800 text-zinc-400 rounded-xl hover:text-white" title="Ekspor"><Icon name="Download" size={18}/></button>
+                                    <button onClick={() => fileInputRef.current.click()} className="p-2.5 bg-zinc-800 text-zinc-400 rounded-xl hover:text-white"><Icon name="Upload" size={18}/></button>
+                                    <button onClick={exportData} className="p-2.5 bg-zinc-800 text-zinc-400 rounded-xl hover:text-white"><Icon name="Download" size={18}/></button>
                                     <div className="w-[1px] h-10 bg-zinc-800 mx-1"></div>
                                     <button onClick={() => { setForm({ title: '', artist: '', content: '', tempo: 120, key: 'C', style: '', youtube: '' }); setView('editor'); }} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-black uppercase hover:bg-indigo-500 transition-all">Baru</button>
                                 </div>
@@ -327,19 +293,14 @@
                                 <input 
                                     type="text" 
                                     placeholder="Cari lagu atau artis..." 
-                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-5 pl-14 pr-6 outline-none focus:border-indigo-500 transition-all font-semibold"
+                                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl py-5 pl-14 pr-6 outline-none focus:border-indigo-500 transition-all font-semibold text-lg"
                                     value={searchTerm}
                                     onChange={e => setSearchTerm(e.target.value)}
                                 />
                             </div>
-
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {filteredSongs.map(song => (
-                                    <div 
-                                        key={song.id} 
-                                        className="group bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-[2rem] hover:border-indigo-500 transition-all cursor-pointer relative overflow-hidden shadow-sm"
-                                        onClick={() => openStage(song)}
-                                    >
+                                    <div key={song.id} className="group bg-zinc-900/40 border border-zinc-800/50 p-6 rounded-[2rem] hover:border-indigo-500 transition-all cursor-pointer relative overflow-hidden" onClick={() => openStage(song)}>
                                         <div className="flex justify-between items-start mb-4">
                                             <div className="max-w-[80%]">
                                                 <h3 className="font-extrabold text-xl uppercase leading-tight truncate group-hover:text-indigo-400 transition-colors">{song.title}</h3>
@@ -351,7 +312,7 @@
                                             <span className="bg-zinc-800/80 text-[10px] font-bold px-3 py-1 rounded-full text-zinc-400">{song.style || 'Song'}</span>
                                             <span className="bg-zinc-800/80 text-[10px] font-bold px-3 py-1 rounded-full text-zinc-400">{song.tempo} BPM</span>
                                         </div>
-                                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all transform translate-x-4 group-hover:translate-x-0">
+                                        <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
                                             <button onClick={(e) => { e.stopPropagation(); setForm(song); setView('editor'); }} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-white"><Icon name="Edit" size={16} /></button>
                                             <button onClick={(e) => { e.stopPropagation(); if(confirm('Hapus lagu ini?')) setSongs(songs.filter(s => s.id !== song.id)); }} className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-red-500"><Icon name="Trash2" size={16} /></button>
                                         </div>
@@ -367,46 +328,40 @@
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Judul</label>
-                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder="Judul lagu" />
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Artis</label>
-                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.artist} onChange={e => setForm({...form, artist: e.target.value})} placeholder="Nama artis" />
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.artist} onChange={e => setForm({...form, artist: e.target.value})} />
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Nada Dasar</label>
-                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold" value={form.key} onChange={e => setForm({...form, key: e.target.value})} />
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Key</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.key} onChange={e => setForm({...form, key: e.target.value})} placeholder="C" />
                                     </div>
                                     <div className="space-y-2">
                                         <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Tempo (BPM)</label>
-                                        <div className="relative">
-                                            <input type="number" className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold pr-12" value={form.tempo} onChange={e => setForm({...form, tempo: parseInt(e.target.value) || 0})} />
-                                            <button onClick={handleTap} className="absolute right-2 top-2 bottom-2 bg-indigo-600 px-2 rounded-lg text-[9px] font-bold uppercase">Tap</button>
-                                        </div>
+                                        <input type="number" className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold" value={form.tempo} onChange={e => setForm({...form, tempo: parseInt(e.target.value)})} />
                                     </div>
                                     <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Style</label>
-                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold" value={form.style} onChange={e => setForm({...form, style: e.target.value})} placeholder="Genre" />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">YouTube Link</label>
-                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 text-center font-bold" value={form.youtube} onChange={e => setForm({...form, youtube: e.target.value})} placeholder="URL Video" />
+                                        <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">YouTube URL/ID</label>
+                                        <input className="w-full bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl outline-none focus:border-indigo-500 font-bold text-indigo-400" value={form.youtube} onChange={e => setForm({...form, youtube: e.target.value})} placeholder="ID atau Link Video" />
                                     </div>
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Isi Lagu (Lirik & Chord)</label>
+                                    <label className="text-[10px] font-black uppercase text-zinc-500 ml-2">Lirik & Chord (Tanpa Wrap)</label>
                                     <textarea 
-                                        className="w-full bg-zinc-800/50 border border-zinc-700/50 p-6 rounded-3xl outline-none focus:border-indigo-500 transition-all font-mono text-sm leading-relaxed min-h-[400px]"
+                                        className="w-full bg-zinc-800/50 border border-zinc-700/50 p-6 rounded-3xl outline-none focus:border-indigo-500 transition-all font-mono text-sm leading-relaxed min-h-[400px] overflow-x-auto whitespace-pre"
+                                        style={{ wordWrap: 'normal', whiteSpace: 'pre' }}
                                         value={form.content}
                                         onChange={e => setForm({...form, content: e.target.value})}
-                                        placeholder="Tulis lirik dan chord. Gunakan [Intro], [Chorus], dll."
+                                        placeholder="Posisikan chord di atas lirik dengan spasi."
                                     ></textarea>
                                 </div>
                                 <div className="flex gap-4 pt-4">
-                                    <button onClick={() => setView('library')} className="flex-1 bg-zinc-800 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-zinc-700 transition-all">Batal</button>
-                                    <button onClick={handleSave} className="flex-1 bg-indigo-600 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-indigo-500 shadow-xl shadow-indigo-600/30 transition-all">Simpan</button>
+                                    <button onClick={() => setView('library')} className="flex-1 bg-zinc-800 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-zinc-700">Batal</button>
+                                    <button onClick={handleSave} className="flex-1 bg-indigo-600 py-5 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-indigo-500 shadow-xl shadow-indigo-600/30">Simpan</button>
                                 </div>
                             </div>
                         </main>
@@ -414,7 +369,6 @@
 
                     {view === 'stage' && activeSong && (
                         <div className="fixed inset-0 bg-black z-[100] flex flex-col animate-in fade-in duration-300">
-                            {/* Header Kontrol */}
                             <div className="glass-panel border-b border-zinc-900 p-4 px-6 flex justify-between items-center shrink-0">
                                 <div className="flex items-center gap-4 max-w-[50%]">
                                     <button onClick={() => setView('library')} className="w-10 h-10 bg-zinc-900 rounded-full flex items-center justify-center hover:bg-zinc-800 transition-colors shrink-0"><Icon name="ArrowLeft" /></button>
@@ -423,59 +377,71 @@
                                         <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{activeSong.artist}</p>
                                     </div>
                                 </div>
-                                
-                                <div className="flex items-center gap-2 sm:gap-3">
+                                <div className="flex items-center gap-3">
                                     <div className="hidden md:flex items-center gap-2 bg-zinc-900 px-3 py-2 rounded-xl">
                                         <Icon name="ChevronDown" size={14} className="text-zinc-600" />
                                         <input type="range" min="0.1" max="5" step="0.1" value={scrollSpeed} onChange={e => setScrollSpeed(parseFloat(e.target.value))} className="w-20" />
                                     </div>
-                                    <button onClick={() => setIsScrolling(!isScrolling)} className={`p-2.5 rounded-xl transition-all ${isScrolling ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-zinc-500'}`} title="Auto Scroll">
+                                    <button onClick={() => setIsScrolling(!isScrolling)} className={`p-2.5 rounded-xl transition-all ${isScrolling ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-zinc-500'}`}>
                                         <Icon name={isScrolling ? "Pause" : "Play"} size={18} />
                                     </button>
-                                    <button onClick={() => setIsMetronomeOn(!isMetronomeOn)} className={`p-2.5 rounded-xl transition-all ${isMetronomeOn ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-zinc-500'}`} title="Metronome">
+                                    <button onClick={() => setIsMetronomeOn(!isMetronomeOn)} className={`p-2.5 rounded-xl transition-all ${isMetronomeOn ? 'bg-indigo-600 text-white' : 'bg-zinc-900 text-zinc-500'}`}>
                                         <Icon name="Activity" size={18} />
                                     </button>
-                                    {getYouTubeEmbed(activeSong.youtube) && (
-                                        <button onClick={() => setShowVideo(!showVideo)} className={`p-2.5 rounded-xl transition-all ${showVideo ? 'bg-red-600 text-white' : 'bg-zinc-900 text-zinc-500'}`} title="YouTube"><Icon name="Youtube" size={18} /></button>
+                                    {activeSong.youtube && (
+                                        <button onClick={() => setShowVideo(!showVideo)} className={`p-2.5 rounded-xl transition-all ${showVideo ? 'bg-red-600 text-white' : 'bg-zinc-900 text-zinc-500'}`}>
+                                            <Icon name="Youtube" size={18} />
+                                        </button>
                                     )}
                                 </div>
                             </div>
 
-                            {/* Konten Utama */}
-                            <div className="flex-1 flex overflow-hidden relative">
+                            <div className="flex-1 flex overflow-hidden">
                                 <div 
                                     ref={scrollRef} 
                                     onScroll={handleManualScroll}
-                                    className={`flex-1 overflow-y-auto p-8 md:p-16 lg:px-32 pb-60 no-scrollbar transition-all ${showVideo ? 'md:w-2/3' : 'w-full'}`}
+                                    className="flex-1 overflow-y-auto no-scrollbar"
                                 >
-                                    <div className="max-w-5xl mx-auto space-y-0 text-xl md:text-3xl lg:text-4xl">
-                                        {activeSong.content.split('\n').map((line, idx) => {
-                                            const chordLine = isChordLine(line);
-                                            const structureLine = isStructureLine(line);
-                                            
-                                            let className = "lyrics-line";
-                                            if (chordLine) className = "chord-line";
-                                            if (structureLine) className = "structure-line";
+                                    <div className="song-container p-8 md:p-16 lg:px-32 pb-60">
+                                        <div className="min-w-fit mx-auto text-xl md:text-3xl lg:text-4xl">
+                                            {activeSong.content.split('\n').map((line, idx) => {
+                                                const chordLine = isChordLine(line);
+                                                const structureLine = isStructureLine(line);
+                                                
+                                                let className = "lyrics-line";
+                                                if (chordLine) className = "chord-line";
+                                                if (structureLine) className = "structure-line";
 
-                                            return (
-                                                <pre key={idx} className={className}>
-                                                    {chordLine ? transposeChord(line, transpose) : (line || ' ')}
-                                                </pre>
-                                            );
-                                        })}
+                                                return (
+                                                    <pre key={idx} className={className}>
+                                                        {chordLine ? transposeChord(line, transpose) : (line || ' ')}
+                                                    </pre>
+                                                );
+                                            })}
+                                        </div>
                                     </div>
                                 </div>
-
-                                {showVideo && getYouTubeEmbed(activeSong.youtube) && (
-                                    <div className="hidden md:block w-1/3 border-l border-zinc-900 bg-zinc-950 p-4 animate-in slide-in-from-right duration-300">
-                                        <div className="sticky top-4 aspect-video bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800">
-                                            <iframe width="100%" height="100%" src={`https://www.youtube.com/embed/${getYouTubeEmbed(activeSong.youtube)}?autoplay=1`} frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen></iframe>
+                                
+                                {showVideo && activeSong.youtube && (
+                                    <div className="w-[30%] border-l border-zinc-900 bg-black hidden lg:flex flex-col animate-in slide-in-from-right duration-300">
+                                        <div className="aspect-video w-full bg-zinc-900">
+                                            <iframe 
+                                                width="100%" 
+                                                height="100%" 
+                                                src={`https://www.youtube.com/embed/${getYouTubeId(activeSong.youtube)}`} 
+                                                frameBorder="0" 
+                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                                allowFullScreen
+                                            ></iframe>
+                                        </div>
+                                        <div className="p-4 text-zinc-500 text-xs text-center font-bold uppercase tracking-widest">
+                                            Video Referensi
                                         </div>
                                     </div>
                                 )}
                             </div>
 
-                            {/* Toolbar Bawah */}
+                            {/* Floating Controls */}
                             <div className="fixed bottom-6 left-1/2 -translate-x-1/2 glass-panel p-2 px-6 rounded-full z-[110] flex items-center gap-6 shadow-2xl border-zinc-700/50">
                                 <div className="flex items-center gap-4">
                                     <span className="text-[9px] font-black uppercase text-zinc-500 hidden sm:inline">Transpose</span>
@@ -486,8 +452,8 @@
                                     </div>
                                 </div>
                                 <div className="w-[1px] h-6 bg-zinc-800"></div>
-                                <button onClick={() => { setForm(activeSong); setView('editor'); }} className="p-2 text-zinc-500 hover:text-indigo-400" title="Edit"><Icon name="Edit" size={18} /></button>
-                                <button onClick={() => window.print()} className="p-2 text-zinc-500 hover:text-white" title="Cetak"><Icon name="Printer" size={18} /></button>
+                                <button onClick={() => { setForm(activeSong); setView('editor'); }} className="p-2 text-zinc-500 hover:text-indigo-400"><Icon name="Edit" size={18} /></button>
+                                <button onClick={() => window.print()} className="p-2 text-zinc-500 hover:text-white"><Icon name="Printer" size={18} /></button>
                             </div>
                         </div>
                     )}
