@@ -1,0 +1,770 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc,
+  writeBatch,
+  query,
+  where
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  Music, 
+  Plus, 
+  Search, 
+  Trash2, 
+  X, 
+  Edit3, 
+  Youtube,
+  ChevronUp,
+  ChevronDown,
+  Download,
+  Upload,
+  Database,
+  ListMusic,
+  ArrowDownCircle,
+  Settings2,
+  Zap,
+  CheckCircle2,
+  Info,
+  Play,
+  Pause,
+  PlusCircle,
+  FolderPlus,
+  ArrowRight,
+  ChevronRight
+} from 'lucide-react';
+
+// --- Firebase Configuration ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'cafe-pianist-pro-v2';
+
+// --- Helper Functions ---
+const chromaticScale = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const flatsToSharps = { 'Db': 'C#', 'Eb': 'D#', 'Gb': 'F#', 'Ab': 'G#', 'Bb': 'A#' };
+
+const transposeChord = (chordLine, semiTones) => {
+  if (!chordLine || semiTones === 0) return chordLine;
+  return chordLine.replace(/[A-G][#b]?(?:m|maj|min|dim|aug|sus|add)?[0-9]*(?:\/[A-G][#b]?)?/gi, (match) => {
+    return match.replace(/[A-G][#b]?/g, (root) => {
+      let r = root.toUpperCase();
+      if (flatsToSharps[r]) r = flatsToSharps[r];
+      let index = chromaticScale.indexOf(r);
+      if (index === -1) return root;
+      let newIndex = (index + semiTones) % 12;
+      if (newIndex < 0) newIndex += 12;
+      return chromaticScale[newIndex];
+    });
+  });
+};
+
+const isChordLine = (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  const isLabel = /^(Intro|Reff|Chorus|Verse|Bridge|Musik|Outro|Solo|Pre-Chorus|Ending)\s*[:|-]/i.test(trimmed);
+  if (isLabel) return false;
+  const words = line.trim().split(/\s+/);
+  const chordRegex = /^[A-G][#b]?(?:m|maj|min|dim|aug|sus|add)?[0-9]*(?:\/[A-G][#b]?)?$|^\|$/i;
+  const chordWords = words.filter(w => chordRegex.test(w) || w === '|');
+  return chordWords.length > 0 && (chordWords.length / words.length >= 0.4);
+};
+
+const getYoutubeId = (url) => {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = url.match(regExp);
+  return (match && match[2].length === 11) ? match[2] : null;
+};
+
+const renderLineWithBars = (line, isChord, transposeVal) => {
+  const parts = line.split(/(\|)/g);
+  return parts.map((part, idx) => {
+    if (part === '|') {
+      return (
+        <span key={idx} className="inline-block px-0.5 text-indigo-500 font-black opacity-60 scale-y-125" style={{ transformOrigin: 'center' }}>
+          |
+        </span>
+      );
+    }
+    return <span key={idx}>{isChord ? transposeChord(part, transposeVal) : part}</span>;
+  });
+};
+
+const renderSmartContent = (text, transposeVal) => {
+  if (!text) return null;
+  const lines = text.split('\n');
+  return (
+    <div className="sheet-content font-mono select-text">
+      {lines.map((line, lineIdx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={lineIdx} className="h-4" />;
+        const isStructure = /^(Intro|Reff|Chorus|Verse|Bridge|Musik|Outro|Solo|Pre-Chorus|Ending)\s*[:|-]/i.test(trimmed);
+        if (isStructure) {
+          return (
+            <div key={lineIdx} className="mt-8 mb-4">
+              <span className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-black uppercase tracking-widest rounded-md">
+                {trimmed}
+              </span>
+            </div>
+          );
+        }
+        if (isChordLine(line)) {
+          return (
+            <div key={lineIdx} className="text-indigo-400 font-bold text-xl md:text-2xl leading-none whitespace-pre" style={{ letterSpacing: '0' }}>
+              {renderLineWithBars(line, true, transposeVal)}
+            </div>
+          );
+        }
+        const hasInlineChords = line.includes('[');
+        if (hasInlineChords) {
+           const parts = line.split(/(\[[^\]]+\])/g);
+           return (
+             <div key={lineIdx} className="text-zinc-300 text-xl md:text-2xl mb-2 whitespace-pre leading-normal" style={{ letterSpacing: '0' }}>
+                {parts.map((part, pIdx) => (
+                  part.startsWith('[') && part.endsWith(']') ? 
+                  <span key={pIdx} className="text-indigo-400 font-bold">{transposeChord(part.slice(1, -1), transposeVal)}</span> : 
+                  renderLineWithBars(part, false, 0)
+                ))}
+             </div>
+           );
+        }
+        return (
+          <div key={lineIdx} className="text-zinc-400 text-xl md:text-2xl mb-2 whitespace-pre leading-normal" style={{ letterSpacing: '0' }}>
+            {renderLineWithBars(line, false, 0)}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [songs, setSongs] = useState([]);
+  const [setlists, setSetlists] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('library'); 
+  const [isAdding, setIsAdding] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const [editingSong, setEditingSong] = useState(null);
+  const [viewingSong, setViewingSong] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showYoutube, setShowYoutube] = useState(false);
+  const [transposeValue, setTransposeValue] = useState(0);
+  const [statusMsg, setStatusMsg] = useState(null);
+  
+  // Setlist Specific States
+  const [isAddingSetlist, setIsAddingSetlist] = useState(false);
+  const [newSetlistTitle, setNewSetlistTitle] = useState('');
+  const [activeSetlistId, setActiveSetlistId] = useState(null);
+  const [showAddToSetlist, setShowAddToSetlist] = useState(null);
+
+  const [dbStatus, setDbStatus] = useState({
+    lastBackup: localStorage.getItem('last_backup_date') || 'Belum pernah',
+    totalSongs: 0,
+    syncStatus: 'Disconnected',
+    isImporting: false,
+    importProgress: 0
+  });
+
+  const [isMetronomeActive, setIsMetronomeActive] = useState(false);
+  const [bpm, setBpm] = useState(120);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [scrollSpeed, setScrollSpeed] = useState(1);
+  const [beatPulse, setBeatPulse] = useState(false);
+  
+  const metronomeInterval = useRef(null);
+  const scrollInterval = useRef(null);
+  const scrollContainerRef = useRef(null);
+  const audioCtx = useRef(null);
+  const backupInputRef = useRef(null);
+
+  const [formData, setFormData] = useState({
+    title: '', artist: '', content: '', tempo: '120', style: 'Pop', key: 'C', youtubeUrl: ''
+  });
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error("Auth fail:", err); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+      setDbStatus(prev => ({ ...prev, syncStatus: u ? 'Connected' : 'Auth Required' }));
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    const songsRef = collection(db, 'artifacts', appId, 'public', 'data', 'songs');
+    const unsubSongs = onSnapshot(songsRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSongs(data);
+      setDbStatus(prev => ({ ...prev, totalSongs: data.length }));
+    }, (err) => console.error("Songs Load Error:", err));
+
+    const setlistsRef = collection(db, 'artifacts', appId, 'public', 'data', 'setlists');
+    const unsubSetlists = onSnapshot(setlistsRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSetlists(data);
+    }, (err) => console.error("Setlists Load Error:", err));
+
+    return () => { unsubSongs(); unsubSetlists(); };
+  }, [user]);
+
+  useEffect(() => {
+    if (isMetronomeActive) {
+      if (!audioCtx.current) audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
+      const interval = 60000 / bpm;
+      metronomeInterval.current = setInterval(() => {
+        const osc = audioCtx.current.createOscillator();
+        const env = audioCtx.current.createGain();
+        osc.frequency.setValueAtTime(880, audioCtx.current.currentTime);
+        env.gain.exponentialRampToValueAtTime(0.001, audioCtx.current.currentTime + 0.05);
+        osc.connect(env); env.connect(audioCtx.current.destination);
+        osc.start(); osc.stop(audioCtx.current.currentTime + 0.05);
+        setBeatPulse(true);
+        setTimeout(() => setBeatPulse(false), 100);
+      }, interval);
+    } else {
+      clearInterval(metronomeInterval.current);
+    }
+    return () => clearInterval(metronomeInterval.current);
+  }, [isMetronomeActive, bpm]);
+
+  useEffect(() => {
+    if (isScrolling && scrollContainerRef.current) {
+      scrollInterval.current = setInterval(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollBy({ top: scrollSpeed, behavior: 'auto' });
+        }
+      }, 50);
+    } else {
+      clearInterval(scrollInterval.current);
+    }
+    return () => clearInterval(scrollInterval.current);
+  }, [isScrolling, scrollSpeed]);
+
+  const showStatus = (msg, type = 'success') => {
+    setStatusMsg({ text: msg, type });
+    setTimeout(() => setStatusMsg(null), 3000);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+    try {
+      if (editingSong?.id) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'songs', editingSong.id), { ...formData, updatedAt: Date.now() });
+        showStatus("Lagu diperbarui");
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'songs'), { ...formData, createdAt: Date.now(), createdBy: user.uid });
+        showStatus("Lagu disimpan");
+      }
+      resetForm();
+    } catch (err) { showStatus("Gagal menyimpan", "error"); }
+  };
+
+  const createSetlist = async () => {
+    if (!newSetlistTitle.trim() || !user) return;
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'setlists'), {
+        title: newSetlistTitle,
+        songIds: [],
+        createdAt: Date.now(),
+        createdBy: user.uid
+      });
+      setNewSetlistTitle('');
+      setIsAddingSetlist(false);
+      showStatus("Setlist dibuat");
+    } catch (err) { showStatus("Gagal membuat setlist", "error"); }
+  };
+
+  const addSongToSetlist = async (setlistId, songId) => {
+    if (!user) return;
+    const setlist = setlists.find(s => s.id === setlistId);
+    if (!setlist) return;
+    if (setlist.songIds.includes(songId)) {
+      showStatus("Lagu sudah ada di setlist", "error");
+      return;
+    }
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'setlists', setlistId), {
+        songIds: [...setlist.songIds, songId]
+      });
+      setShowAddToSetlist(null);
+      showStatus("Ditambahkan ke setlist");
+    } catch (err) { showStatus("Gagal menambahkan", "error"); }
+  };
+
+  const removeSongFromSetlist = async (setlistId, songId) => {
+    if (!user) return;
+    const setlist = setlists.find(s => s.id === setlistId);
+    if (!setlist) return;
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'setlists', setlistId), {
+        songIds: setlist.songIds.filter(id => id !== songId)
+      });
+      showStatus("Lagu dilepas dari setlist");
+    } catch (err) { showStatus("Gagal melepas lagu", "error"); }
+  };
+
+  const handleDeleteSetlist = async (id, title) => {
+    if (!user) return;
+    // Gunakan prompt kustom atau konfirmasi sederhana
+    if (!window.confirm(`Hapus setlist "${title}"?`)) return;
+    
+    try {
+      const setlistRef = doc(db, 'artifacts', appId, 'public', 'data', 'setlists', id);
+      await deleteDoc(setlistRef);
+      if (activeSetlistId === id) setActiveSetlistId(null);
+      showStatus("Setlist berhasil dihapus");
+    } catch (err) { 
+      console.error("Delete Setlist Error:", err);
+      showStatus("Gagal menghapus setlist", "error"); 
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({ title: '', artist: '', content: '', tempo: '120', style: 'Pop', key: 'C', youtubeUrl: '' });
+    setIsAdding(false);
+    setEditingSong(null);
+  };
+
+  const deleteSong = async (id, title) => {
+    if (!user) return;
+    if (!confirm(`Hapus permanen "${title}" dari Cloud?`)) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'songs', id));
+      if (viewingSong?.id === id) setViewingSong(null);
+      showStatus("Lagu dihapus");
+    } catch (err) { showStatus("Gagal menghapus", "error"); }
+  };
+
+  const handleExportAll = () => {
+    const backupData = {
+      version: "3.0 PRO",
+      exportDate: new Date().toISOString(),
+      songs: songs.map(({ id, ...rest }) => rest),
+      setlists: setlists.map(({ id, ...rest }) => rest)
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `PianistPro_Backup_${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    showStatus("Backup diunduh");
+  };
+
+  const handleRestoreBackup = (e) => {
+    const file = e.target.files[0];
+    if (!file || !user) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (!data.songs) throw new Error("Format tidak valid");
+        setDbStatus(prev => ({ ...prev, isImporting: true }));
+        const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'songs');
+        for (let i = 0; i < data.songs.length; i += 400) {
+          const batch = writeBatch(db);
+          data.songs.slice(i, i + 400).forEach(s => {
+            const { id, ...clean } = s;
+            batch.set(doc(collectionRef), { ...clean, createdBy: user.uid });
+          });
+          await batch.commit();
+        }
+        setDbStatus(prev => ({ ...prev, isImporting: false }));
+        showStatus("Restore berhasil");
+      } catch (err) { showStatus("Gagal restore", "error"); }
+    };
+    reader.readAsText(file);
+  };
+
+  const filteredSongs = useMemo(() => {
+    return songs.filter(s => 
+      s.title?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      s.artist?.toLowerCase().includes(searchTerm.toLowerCase())
+    ).sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+  }, [songs, searchTerm]);
+
+  if (loading) return <div className="h-screen bg-zinc-950 flex flex-col items-center justify-center text-indigo-500 font-black animate-pulse uppercase tracking-[0.3em]">
+    <Zap size={48} className="mb-4" />
+    CAFE PIANIST PRO
+  </div>;
+
+  const activeYoutubeId = viewingSong ? getYoutubeId(viewingSong.youtubeUrl) : null;
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans select-none overflow-x-hidden">
+      <style>{`
+        input, textarea, select { font-size: 16px !important; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .sheet-content { font-family: 'JetBrains Mono', monospace; white-space: pre; }
+      `}</style>
+
+      {beatPulse && <div className="fixed inset-0 pointer-events-none z-[100] border-[10px] border-indigo-500/20 transition-all duration-75"></div>}
+
+      {statusMsg && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[110] animate-in fade-in slide-in-from-top-4">
+          <div className={`px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border ${statusMsg.type === 'error' ? 'bg-red-950 border-red-500/50 text-red-200' : 'bg-emerald-950 border-emerald-500/50 text-emerald-200'}`}>
+            <span className="text-[10px] font-black uppercase tracking-widest">{statusMsg.text}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-xl border-b border-zinc-900 px-4 py-3">
+        <div className="max-w-6xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="bg-indigo-600 p-2.5 rounded-2xl shadow-lg">
+              <Music size={22} className="text-white" />
+            </div>
+            <div className="hidden sm:block">
+              <h1 className="text-lg font-black tracking-tight">Pianist Pro</h1>
+            </div>
+          </div>
+          
+          <div className="flex bg-zinc-900 p-1 rounded-2xl border border-zinc-800">
+            <button onClick={() => setActiveTab('library')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'library' ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}>
+               Library
+            </button>
+            <button onClick={() => setActiveTab('setlists')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'setlists' ? 'bg-zinc-800 text-white' : 'text-zinc-500'}`}>
+               Setlists
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowHelp(true)} className="w-10 h-10 bg-zinc-900 border border-zinc-800 flex items-center justify-center rounded-xl text-zinc-400">
+              <Settings2 size={20} />
+            </button>
+            <button onClick={() => { resetForm(); setIsAdding(true); }} className="w-10 h-10 bg-indigo-600 flex items-center justify-center rounded-xl shadow-lg">
+              <Plus size={24} />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto p-4 md:p-8">
+        {activeTab === 'library' ? (
+          <>
+            <div className="relative mb-8">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-700" size={18} />
+              <input 
+                type="text"
+                placeholder="Cari lagu di library..."
+                className="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl py-4 pl-12 pr-4 focus:outline-none text-white shadow-inner placeholder:text-zinc-700 font-medium"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredSongs.map(song => (
+                <div 
+                  key={song.id} 
+                  className="bg-zinc-900/40 hover:bg-zinc-900 border border-zinc-800 rounded-3xl p-6 transition-all cursor-pointer group flex flex-col hover:border-indigo-500/30"
+                  onClick={() => { 
+                    setViewingSong(song); 
+                    setTransposeValue(0); 
+                    setShowYoutube(false);
+                    setBpm(parseInt(song.tempo) || 120);
+                  }}
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex-1 min-w-0 pr-2">
+                      <h3 className="font-bold text-white text-lg truncate uppercase tracking-tight">{song.title}</h3>
+                      <p className="text-sm text-zinc-500 truncate font-medium">{song.artist}</p>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setShowAddToSetlist(song); }}
+                      className="p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:text-indigo-400 transition-colors"
+                    >
+                      <PlusCircle size={18} />
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-zinc-800/50 pt-4 mt-auto">
+                    <div className="flex items-center gap-4 text-[10px] text-zinc-500 font-black uppercase tracking-wider">
+                      <span>{song.key}</span>
+                      <span>{song.tempo} BPM</span>
+                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); deleteSong(song.id, song.title); }} className="p-2 text-zinc-800 hover:text-red-500 transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-black uppercase tracking-widest">Daftar Setlist</h2>
+              <button 
+                onClick={() => setIsAddingSetlist(true)} 
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 rounded-xl text-[10px] font-black uppercase tracking-widest"
+              >
+                <FolderPlus size={16} /> Baru
+              </button>
+            </div>
+
+            {isAddingSetlist && (
+              <div className="bg-zinc-900 p-6 rounded-3xl border border-indigo-500/30 animate-in zoom-in-95">
+                <input 
+                  autoFocus
+                  placeholder="Nama Setlist (Misal: Wedding Gigs)" 
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-4 mb-4"
+                  value={newSetlistTitle}
+                  onChange={e => setNewSetlistTitle(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createSetlist()}
+                />
+                <div className="flex gap-2">
+                  <button onClick={createSetlist} className="flex-1 bg-indigo-600 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest">Buat</button>
+                  <button onClick={() => setIsAddingSetlist(false)} className="px-6 bg-zinc-800 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest">Batal</button>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4">
+              {setlists.map(sl => (
+                <div key={sl.id} className="overflow-hidden border border-zinc-800 rounded-3xl bg-zinc-900/40">
+                  <div 
+                    className="p-6 flex justify-between items-center cursor-pointer hover:bg-zinc-800/50 transition-colors"
+                    onClick={() => setActiveSetlistId(activeSetlistId === sl.id ? null : sl.id)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-zinc-800 rounded-2xl flex items-center justify-center text-indigo-400">
+                        <ListMusic size={24} />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-white uppercase tracking-tight">{sl.title}</h3>
+                        <p className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">{sl.songIds?.length || 0} Lagu</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      {/* Tombol Hapus Setlist */}
+                      <button 
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          handleDeleteSetlist(sl.id, sl.title); 
+                        }} 
+                        className="p-3 bg-zinc-800 hover:bg-red-950/30 rounded-xl text-zinc-600 hover:text-red-500 transition-all border border-transparent hover:border-red-500/20"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                      <ChevronRight size={20} className={`text-zinc-700 transition-transform ${activeSetlistId === sl.id ? 'rotate-90 text-indigo-500' : ''}`} />
+                    </div>
+                  </div>
+                  
+                  {activeSetlistId === sl.id && (
+                    <div className="border-t border-zinc-800 p-4 bg-zinc-950/30 animate-in slide-in-from-top-2">
+                      {(!sl.songIds || sl.songIds.length === 0) ? (
+                        <p className="text-center py-8 text-[10px] text-zinc-600 font-black uppercase tracking-widest italic">Belum ada lagu di setlist ini</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {sl.songIds.map((sid, idx) => {
+                            const song = songs.find(s => s.id === sid);
+                            if (!song) return null;
+                            return (
+                              <div 
+                                key={sid} 
+                                onClick={() => setViewingSong(song)}
+                                className="group flex items-center justify-between p-4 bg-zinc-900/80 rounded-2xl border border-zinc-800/50 hover:border-indigo-500/20 cursor-pointer"
+                              >
+                                <div className="flex items-center gap-4">
+                                  <span className="text-zinc-800 font-black italic text-lg">{idx + 1}</span>
+                                  <div>
+                                    <h4 className="font-bold text-sm text-zinc-200 uppercase">{song.title}</h4>
+                                    <p className="text-[9px] text-zinc-600 uppercase font-black tracking-widest">{song.artist} • {song.key}</p>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); removeSongFromSetlist(sl.id, sid); }}
+                                  className="p-2 opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all"
+                                >
+                                  <X size={16} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Add To Setlist Modal */}
+      {showAddToSetlist && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/95 backdrop-blur-md">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-[2.5rem] w-full max-w-md p-8 overflow-hidden">
+            <h3 className="text-sm font-black uppercase tracking-widest text-indigo-400 mb-6 flex items-center gap-2">
+              <PlusCircle size={18} /> Tambah ke Setlist
+            </h3>
+            <p className="text-xl font-bold mb-8 uppercase tracking-tight">"{showAddToSetlist.title}"</p>
+            <div className="space-y-3 max-h-60 overflow-y-auto pr-2 no-scrollbar">
+              {setlists.map(sl => (
+                <button 
+                  key={sl.id}
+                  onClick={() => addSongToSetlist(sl.id, showAddToSetlist.id)}
+                  className="w-full p-4 bg-zinc-800/50 border border-zinc-700/50 hover:bg-zinc-800 hover:border-indigo-500/30 rounded-2xl flex items-center justify-between transition-all active:scale-95"
+                >
+                  <span className="font-bold text-zinc-300 uppercase text-xs">{sl.title}</span>
+                  <ArrowRight size={14} className="text-zinc-600" />
+                </button>
+              ))}
+              {setlists.length === 0 && <p className="text-center text-zinc-600 text-[10px] py-4">Belum ada setlist. Buat dulu di tab Setlists.</p>}
+            </div>
+            <button onClick={() => setShowAddToSetlist(null)} className="w-full mt-8 py-4 bg-zinc-800 rounded-2xl font-black uppercase text-[10px] tracking-widest text-zinc-500">Tutup</button>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showHelp && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-[2rem] w-full max-w-xl p-8">
+            <div className="flex justify-between items-center mb-8">
+               <h3 className="font-black uppercase tracking-widest text-sm flex items-center gap-2"><Database size={16} className="text-indigo-500" /> Database Status</h3>
+               <button onClick={() => setShowHelp(false)} className="p-2 bg-zinc-800 rounded-full"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={handleExportAll} className="p-6 bg-zinc-800 rounded-3xl flex flex-col items-center gap-3 transition-all border border-zinc-700/50">
+                    <Download size={24} className="text-indigo-400" />
+                    <span className="text-[10px] font-black uppercase">Backup Cloud</span>
+                </button>
+                <button onClick={() => backupInputRef.current.click()} className="p-6 bg-zinc-800 rounded-3xl flex flex-col items-center gap-3 transition-all border border-zinc-700/50">
+                    <input type="file" ref={backupInputRef} onChange={handleRestoreBackup} className="hidden" accept=".json" />
+                    <Upload size={24} className="text-emerald-400" />
+                    <span className="text-[10px] font-black uppercase">Restore Data</span>
+                </button>
+              </div>
+              <div className="p-4 bg-zinc-950/50 rounded-2xl border border-zinc-800 text-[11px] text-zinc-500">
+                Data disimpan secara otomatis ke Cloud berdasarkan App ID Anda.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Song Form */}
+      {isAdding && (
+        <div className="fixed inset-0 z-[120] flex flex-col bg-zinc-950 md:bg-black/90 md:items-center md:justify-center">
+          <div className="bg-zinc-950 md:bg-zinc-900 md:border md:border-zinc-800 md:rounded-3xl w-full md:max-w-3xl h-full md:h-auto overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-zinc-800 flex justify-between items-center">
+              <h2 className="font-black uppercase tracking-widest">{editingSong ? 'Edit Lagu' : 'Lagu Baru'}</h2>
+              <button onClick={resetForm} className="p-2"><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto no-scrollbar">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input required placeholder="Judul Lagu" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-4" />
+                <input required placeholder="Nama Artis" value={formData.artist} onChange={e => setFormData({...formData, artist: e.target.value})} className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-4" />
+                <div className="grid grid-cols-3 gap-2 md:col-span-2">
+                  <input placeholder="Key" value={formData.key} onChange={e => setFormData({...formData, key: e.target.value})} className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-4 text-center" />
+                  <input type="number" placeholder="BPM" value={formData.tempo} onChange={e => setFormData({...formData, tempo: e.target.value})} className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-4 text-center" />
+                  <select value={formData.style} onChange={e => setFormData({...formData, style: e.target.value})} className="bg-zinc-800/30 border border-zinc-800 rounded-xl px-2 appearance-none text-center font-bold">
+                    <option>Pop</option><option>Jazz</option><option>Blues</option><option>Rock</option>
+                  </select>
+                </div>
+                <input placeholder="YouTube URL" value={formData.youtubeUrl} onChange={e => setFormData({...formData, youtubeUrl: e.target.value})} className="bg-zinc-800/30 border border-zinc-800 rounded-xl p-4 md:col-span-2" />
+              </div>
+              <textarea placeholder="Lirik & Chord... [C] untuk inline chord." value={formData.content} onChange={e => setFormData({...formData, content: e.target.value})} rows="10" className="w-full bg-zinc-800/20 border border-zinc-800 rounded-2xl p-4 font-mono text-sm outline-none" />
+              <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black uppercase tracking-widest">Simpan ke Cloud</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Viewing Mode */}
+      {viewingSong && (
+        <div className="fixed inset-0 z-[150] bg-zinc-950 flex flex-col animate-in fade-in">
+          <div className="p-4 border-b border-zinc-900 flex justify-between items-center bg-zinc-950/80 backdrop-blur-xl">
+            <div className="flex-1 min-w-0">
+               <h2 className="font-black truncate text-white uppercase text-xl">{viewingSong.title}</h2>
+               <p className="text-[10px] text-zinc-600 uppercase font-black">{viewingSong.artist} • {transposeChord(viewingSong.key, transposeValue)}</p>
+            </div>
+            <div className="flex gap-2">
+              {viewingSong.youtubeUrl && (
+                <button onClick={() => setShowYoutube(!showYoutube)} className={`w-10 h-10 flex items-center justify-center rounded-xl border ${showYoutube ? 'bg-red-500 text-white' : 'bg-zinc-900 text-zinc-400'}`}>
+                  <Youtube size={18} />
+                </button>
+              )}
+              <button onClick={() => { setViewingSong(null); setIsMetronomeActive(false); setIsScrolling(false); }} className="w-10 h-10 bg-indigo-600 text-white flex items-center justify-center rounded-xl"><X size={20} /></button>
+            </div>
+          </div>
+
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 md:p-12 no-scrollbar">
+              <div className="max-w-4xl mx-auto pb-32">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-10">
+                   <div className="bg-zinc-900/40 p-2 rounded-2xl border border-zinc-800/50 flex flex-col items-center">
+                      <span className="text-[7px] font-black text-zinc-600 uppercase mb-2">Transpose</span>
+                      <div className="flex items-center gap-2">
+                         <button onClick={() => setTransposeValue(v => v - 1)} className="w-8 h-8 flex items-center justify-center bg-zinc-800 rounded-lg"><ChevronDown size={14}/></button>
+                         <span className="text-sm font-black w-8 text-center">{transposeValue > 0 ? `+${transposeValue}` : transposeValue}</span>
+                         <button onClick={() => setTransposeValue(v => v + 1)} className="w-8 h-8 flex items-center justify-center bg-zinc-800 rounded-lg"><ChevronUp size={14}/></button>
+                      </div>
+                   </div>
+                   <div className="bg-zinc-900/40 p-2 rounded-2xl border border-zinc-800/50 flex flex-col items-center">
+                      <span className="text-[7px] font-black text-zinc-600 uppercase mb-2">BPM Tempo</span>
+                      <div className="flex items-center gap-2">
+                         <button onClick={() => setBpm(v => Math.max(40, v - 5))} className="w-8 h-8 flex items-center justify-center bg-zinc-800 rounded-lg"><ChevronDown size={14}/></button>
+                         <span className="text-sm font-black w-10 text-center">{bpm}</span>
+                         <button onClick={() => setBpm(v => Math.min(250, v + 5))} className="w-8 h-8 flex items-center justify-center bg-zinc-800 rounded-lg"><ChevronUp size={14}/></button>
+                      </div>
+                   </div>
+                </div>
+                <div className="bg-zinc-900/20 p-6 md:p-12 rounded-[2.5rem] border border-zinc-900">
+                  {renderSmartContent(viewingSong.content, transposeValue)}
+                </div>
+              </div>
+            </div>
+
+            {showYoutube && activeYoutubeId && (
+              <div className="w-full md:w-[400px] h-[300px] md:h-full bg-black border-l border-zinc-900">
+                <iframe className="w-full h-full" src={`https://www.youtube.com/embed/${activeYoutubeId}?autoplay=1`} frameBorder="0" allowFullScreen></iframe>
+              </div>
+            )}
+          </div>
+
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-zinc-900/80 backdrop-blur-2xl px-6 py-4 rounded-[2rem] border border-zinc-800 shadow-2xl">
+            <button onClick={() => setIsScrolling(!isScrolling)} className={`flex items-center gap-2 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest ${isScrolling ? 'bg-indigo-600' : 'bg-zinc-800'}`}>
+              <ArrowDownCircle size={16} /> {isScrolling ? 'Scrolling' : 'Auto Scroll'}
+            </button>
+            <button onClick={() => setIsMetronomeActive(!isMetronomeActive)} className={`flex items-center gap-2 px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest ${isMetronomeActive ? 'bg-indigo-600' : 'bg-zinc-800'}`}>
+              {isMetronomeActive ? <Pause size={16} /> : <Play size={16} />} Metronome
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
