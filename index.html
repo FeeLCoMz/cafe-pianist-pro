@@ -81,6 +81,14 @@
             return chordWords.length > 0 && (chordWords.length / words.length >= 0.4);
         };
 
+        // Helper to extract YouTube ID
+        const getYoutubeId = (url) => {
+            if (!url) return null;
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length === 11) ? match[2] : null;
+        };
+
         function App() {
             const [songs, setSongs] = useState(INITIAL_SONGS);
             const [setlists, setSetlists] = useState(INITIAL_SETLISTS);
@@ -90,6 +98,7 @@
             const [isAddingSetlist, setIsAddingSetlist] = useState(false);
             const [viewingSong, setViewingSong] = useState(null);
             const [activeSetlist, setActiveSetlist] = useState(null);
+            const [showVideo, setShowVideo] = useState(false);
             
             const [transposeValue, setTransposeValue] = useState(0);
             const [statusMsg, setStatusMsg] = useState(null);
@@ -238,7 +247,7 @@
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {filteredSongs.map(song => (
-                                        <div key={song.id} onClick={() => { setViewingSong(song); setTransposeValue(0); }} className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-[2rem] hover:bg-zinc-900 hover:border-indigo-500/30 transition-all cursor-pointer group active:scale-[0.98]">
+                                        <div key={song.id} onClick={() => { setViewingSong(song); setTransposeValue(0); setShowVideo(false); }} className="bg-zinc-900/40 border border-zinc-800 p-6 rounded-[2rem] hover:bg-zinc-900 hover:border-indigo-500/30 transition-all cursor-pointer group active:scale-[0.98]">
                                             <div className="flex justify-between items-start mb-2">
                                                 <h3 className="font-black uppercase tracking-tight text-lg group-hover:text-indigo-400 transition-colors truncate">{song.title}</h3>
                                                 {song.youtube && <Icon name="Youtube" size={16} className="text-red-500" />}
@@ -296,7 +305,7 @@
                                     const song = songs.find(s => s.id === sid);
                                     if(!song) return null;
                                     return (
-                                        <div key={sid} onClick={() => setViewingSong(song)} className="flex items-center gap-4 bg-zinc-900 p-5 rounded-2xl border border-zinc-800 active:scale-95 transition-all">
+                                        <div key={sid} onClick={() => { setViewingSong(song); setShowVideo(false); }} className="flex items-center gap-4 bg-zinc-900 p-5 rounded-2xl border border-zinc-800 active:scale-95 transition-all">
                                             <div className="w-10 h-10 flex items-center justify-center bg-indigo-600 rounded-full font-black text-white">{idx+1}</div>
                                             <div className="flex-1">
                                                 <h4 className="font-black uppercase">{song.title}</h4>
@@ -320,16 +329,34 @@
                                         <p className="text-[10px] font-bold text-zinc-500 uppercase">{viewingSong.artist}</p>
                                     </div>
                                     {viewingSong.youtube && (
-                                        <a href={viewingSong.youtube} target="_blank" className="p-2 bg-red-600/20 text-red-500 rounded-lg">
+                                        <button 
+                                            onClick={() => setShowVideo(!showVideo)} 
+                                            className={`p-2 rounded-lg transition-all ${showVideo ? 'bg-red-600 text-white' : 'bg-red-600/20 text-red-500'}`}
+                                            title="Tonton Video"
+                                        >
                                             <Icon name="Youtube" size={18}/>
-                                        </a>
+                                        </button>
                                     )}
                                 </div>
-                                <button onClick={() => { setViewingSong(null); setIsMetronomeActive(false); }} className="p-2 bg-zinc-900 rounded-xl text-zinc-400"><Icon name="X" size={24}/></button>
+                                <button onClick={() => { setViewingSong(null); setIsMetronomeActive(false); setShowVideo(false); }} className="p-2 bg-zinc-900 rounded-xl text-zinc-400"><Icon name="X" size={24}/></button>
                             </div>
                             
                             <div className="flex-1 overflow-y-auto p-6 md:p-12 no-scrollbar bg-zinc-950">
                                 <div className="max-w-3xl mx-auto">
+                                    {/* Embed YouTube Section */}
+                                    {showVideo && viewingSong.youtube && getYoutubeId(viewingSong.youtube) && (
+                                        <div className="mb-8 aspect-video w-full overflow-hidden rounded-[2rem] border border-zinc-800 shadow-2xl animate-in zoom-in-95 duration-300">
+                                            <iframe 
+                                                className="w-full h-full"
+                                                src={`https://www.youtube.com/embed/${getYoutubeId(viewingSong.youtube)}?autoplay=1`}
+                                                title="YouTube video player" 
+                                                frameBorder="0" 
+                                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                                allowFullScreen
+                                            ></iframe>
+                                        </div>
+                                    )}
+
                                     <div className="flex flex-wrap gap-3 mb-8">
                                         <div className="flex-1 min-w-[150px] bg-zinc-900 p-4 rounded-2xl border border-zinc-800 flex justify-between items-center">
                                             <span className="text-[10px] font-black uppercase text-zinc-500">Key ({transposeChord(viewingSong.key, transposeValue)})</span>
